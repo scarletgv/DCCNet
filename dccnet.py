@@ -205,7 +205,7 @@ def leQuadro(s, IDenviado, IDreceptor):
                 print("Quadro Ack descartado, recebido com ID errado")
                 print(IDenviado)
                 return [], flags               
-    print("ERRO")
+    print("Erro inesperado na leitura do quadro.")
     return [], flags
 
 def iniciaTroca(s, arquivoE, arquivoS):   
@@ -225,35 +225,43 @@ def iniciaTroca(s, arquivoE, arquivoS):
     
 def trocaMensagens(s, primeiroQuadro, entrada, arquivoS, IDenviado, IDreceptor):   
     quadroAtual = primeiroQuadro   
+    ack = False
     while True:
-        byte = s.recv(2)
-        byteHex = byte.decode('ascii')        
-        if byteHex == 'cc': # Inicio de quadro encontrado
-            print("Inicio de quadro.")
-            quadroLido, flags = leQuadro(s, IDenviado, IDreceptor)            
-            if quadroLido != []:
-                #print("Quadro invalido. Descartado.")
-            #else: # QUadro valido
-                if flags == '7f':  # DADOS
-                    print("Quadro de dados recebido com sucesso.")
-                    quadroDecoded = decode16(quadroLido)
-                    unstuff(quadroDecoded)
-                    escreveDados(arquivoS, quadroDecoded)
-                    
-                    print("Enviando quadro ACK.")
-                    quadroAck = constroiQuadroAck(IDenviado)
-                    enviaQuadro(s, quadroAck)   
-                    IDenviado = 1 - IDenviado # Troca o ID de recebimento
-                else:  
-                    print("Quadro ack recebido com sucesso.")
-                    IDreceptor = 1 - IDreceptor # Troca ID de envio
-                    novoQuadro = constroiQuadroDados(entrada, IDreceptor)                    
-                    if novoQuadro == []:
-                        print("Arquivo de entrada vazio. Nao ha quadros para enviar.")
-                    else:
-                        print("Enviando quadro.")                        
-                        quadroAtual = novoQuadro
-                        enviaQuadro(s, quadroAtual)
+        try:
+            byte = s.recv(2)
+            byteHex = byte.decode('ascii')        
+            if byteHex == 'cc': # Inicio de quadro encontrado
+                print("Inicio de quadro.")
+                quadroLido, flags = leQuadro(s, IDenviado, IDreceptor)            
+                if quadroLido != []:
+                    #print("Quadro invalido. Descartado.")
+                #else: # QUadro valido
+                    if flags == '7f':  # DADOS
+                        print("Quadro de dados recebido com sucesso.")
+                        quadroDecoded = decode16(quadroLido)
+                        unstuff(quadroDecoded)
+                        escreveDados(arquivoS, quadroDecoded)
+                        
+                        print("Enviando quadro ACK.")
+                        quadroAck = constroiQuadroAck(IDenviado)
+                        enviaQuadro(s, quadroAck)   
+                        IDenviado = 1 - IDenviado # Troca o ID de recebimento
+                    else:  
+                        print("Quadro ack recebido com sucesso.")
+                        ack = True
+                        IDreceptor = 1 - IDreceptor # Troca ID de envio
+                        novoQuadro = constroiQuadroDados(entrada, IDreceptor)                    
+                        if novoQuadro == []:
+                            print("Arquivo de entrada vazio. Nao ha quadros para enviar.")
+                        else:
+                            print("Enviando quadro.")                        
+                            quadroAtual = novoQuadro
+                            enviaQuadro(s, quadroAtual)
+                            ack = False
+        except socket.timeout:
+            if not ack:
+                print("Retransmitindo...")
+                enviaQuadro(s, quadroAtual)
                 
 def main():    
     if len(sys.argv) < 4:
@@ -269,12 +277,12 @@ def main():
         endereco = ("", porta)
         print("Servidor: porta "+str(porta))
         ss = socket.socket(socket.AF_INET, socket.SOCK_STREAM)    
+        #IP = socket.gethostbyname(socket.getfqdn())
         endereco = ("", porta)
         ss.bind(endereco)
         ss.listen(1)       
         print("Esperando o cliente...")
         s, cliente = ss.accept()
-        s.settimeout(None)
         print("Conectado a {}".format(cliente))  
     elif sys.argv[1] == "-c":
         IP, porta = sys.argv[2].split(':')
@@ -282,10 +290,12 @@ def main():
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)        
         endServidor = (IP, int(porta))
         s.connect(endServidor)
-        s.settimeout(None)             
     else:
         print("Comando invalido.")
-        return      
+        return   
+    
+    s.settimeout(1)
+    
     try:
         iniciaTroca(s, entrada, saida)
     except (KeyboardInterrupt, socket.error):
